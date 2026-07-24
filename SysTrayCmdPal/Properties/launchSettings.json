@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "SysTrayCmdPal (Package)": {
+      "commandName": "MsixPackage",
+      "doNotLaunchApp": true
+    },
+    "SysTrayCmdPal (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

@@ -13,6 +13,8 @@
     <PublishProfile>win-$(Platform).pubxml</PublishProfile>
     <EnableMsixTooling>true</EnableMsixTooling>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
   <ItemGroup>
@@ -47,6 +49,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
+
+    <PackageReference Include="Microsoft.Windows.CsWin32">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
   <!--
@@ -59,38 +65,50 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PublishSingleFile>true</PublishSingleFile>
-    <IsAotCompatible>true</IsAotCompatible>
+    <!-- UI Automation (System.Windows.Automation) relies on reflection/COM and is
+         not trim/AOT/single-file safe, so those optimizations are disabled. -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <IsAotCompatible>false</IsAotCompatible>
 
     <CsWinRTAotOptimizerEnabled>true</CsWinRTAotOptimizerEnabled>
     <CsWinRTAotWarningLevel>2</CsWinRTAotWarningLevel>
     <!-- Suppress DynamicallyAccessedMemberTypes.PublicParameterlessConstructor in fallback code path of Windows SDK projection -->
     <WarningsNotAsErrors>IL2081;$(WarningsNotAsErrors)</WarningsNotAsErrors>
-
-    <!-- When publishing trimmed, make sure to treat trimming warnings as build errors -->
-    <ILLinkTreatWarningsAsErrors>true</ILLinkTreatWarningsAsErrors>
-
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='Debug'">
-    <!-- In Debug builds, trimming is disabled by default, but all the trim & 
-         AOT warnings are enabled. This gives debug builds a tighter inner loop,
-         while at least warning about future trim violations -->
     <PublishTrimmed>false</PublishTrimmed>
-    
-    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
-    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
-    <EnableAotAnalyzer>true</EnableAotAnalyzer>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'!='Debug'">
-    <!-- In Release builds, trimming is enabled by default. 
-         feel free to disable this if needed -->
-    <PublishTrimmed>true</PublishTrimmed>
+    <!-- Trimming disabled because of UI Automation reflection usage. -->
+    <PublishTrimmed>false</PublishTrimmed>
 
     <!-- In release, also ignore the aforementioned ILLink warning -->
     <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
   </PropertyGroup>
 
+
+  <!-- Bundle the injected hook DLL (built by the SysTrayHook NativeAOT project) next
+       to the extension and into the MSIX. Its architecture must match the package.
+       The target below publishes it on demand for the matching RID, so a plain
+       Build/Deploy produces and packages it automatically. -->
+  <PropertyGroup>
+    <HookRid Condition="'$(Platform)'=='ARM64' or '$(Platform)'=='arm64'">win-arm64</HookRid>
+    <HookRid Condition="'$(HookRid)'==''">win-x64</HookRid>
+    <HookProject>$(MSBuildThisFileDirectory)..\SysTrayHook\SysTrayHook.csproj</HookProject>
+    <HookDllPath>$(MSBuildThisFileDirectory)..\SysTrayHook\bin\Release\net10.0\$(HookRid)\publish\SysTrayHook.dll</HookDllPath>
+  </PropertyGroup>
+
+  <Target Name="EnsureHookDll" BeforeTargets="AssignTargetPaths">
+    <Exec Condition="!Exists('$(HookDllPath)')"
+          Command="dotnet publish &quot;$(HookProject)&quot; -r $(HookRid) -c Release" />
+    <ItemGroup>
+      <Content Include="$(HookDllPath)">
+        <Link>SysTrayHook.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+    </ItemGroup>
+  </Target>
 
 </Project>

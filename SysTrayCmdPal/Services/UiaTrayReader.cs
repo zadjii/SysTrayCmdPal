@@ -188,6 +188,16 @@ internal static class UiaTrayReader
                 return false;
             }
 
+            // Only accept third-party notification icons. The shell's own combined
+            // system indicators (volume, network, battery, clock, notifications — the
+            // Win11 "omni button") use AutomationId "SystemTrayIcon" and can't be
+            // meaningfully invoked as individual items, so exclude them.
+            string automationId = button.Current.AutomationId ?? string.Empty;
+            if (!automationId.Equals("NotifyItemIcon", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             string label = (button.Current.Name ?? string.Empty).Trim();
             if (label.Equals(ShowHiddenName, StringComparison.OrdinalIgnoreCase))
             {

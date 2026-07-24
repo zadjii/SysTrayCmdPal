@@ -42,6 +42,9 @@ internal sealed class TrayIcon
     /// <summary>Path to a rendered PNG of the real icon (hook path), if available.</summary>
     public string? IconPngPath { get; init; }
 
+    /// <summary>Version of the icon pixels; changes only when the image actually changes.</summary>
+    public int IconVersion { get; init; }
+
     /// <summary>Tooltip / accessible name.</summary>
     public string Tooltip { get; init; } = string.Empty;
 
@@ -56,11 +59,16 @@ internal sealed class TrayIcon
         ItemGuid is { } g ? "guid-" + g.ToString("N") :
         Element is not null
             ? "uia-" + Math.Abs(DisplayName.GetHashCode(StringComparison.Ordinal)).ToString("X", System.Globalization.CultureInfo.InvariantCulture)
-            : $"{OwnerHwnd:X}-{Id}";
+            : OwnerHwnd != 0
+                ? $"hwnd-{OwnerHwnd:X}"
+                : $"{OwnerHwnd:X}-{Id}";
 
-    /// <summary>Best label to show for the icon.</summary>
-    public string DisplayName =>
-        !string.IsNullOrWhiteSpace(Tooltip) ? Tooltip :
-        !string.IsNullOrWhiteSpace(ProcessName) ? ProcessName :
-        $"Tray icon {Id}";
+    /// <summary>True when the icon has a real tooltip/label.</summary>
+    public bool HasLabel => !string.IsNullOrWhiteSpace(Tooltip);
+
+    /// <summary>
+    /// The label to show, or an empty string when the icon has no tooltip. We do not
+    /// fabricate a name (e.g. "Tray icon 3") — an unlabeled icon simply shows no title.
+    /// </summary>
+    public string DisplayName => HasLabel ? Tooltip : string.Empty;
 }

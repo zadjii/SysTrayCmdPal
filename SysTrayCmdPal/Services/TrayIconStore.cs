@@ -37,28 +37,20 @@ internal sealed class TrayIconStore
     /// <summary>Current icons, in a stable order.</summary>
     public IReadOnlyList<HookRecord> Snapshot()
     {
-        // Some apps (e.g. Task Manager) register many short-lived icons on the same
-        // window with the same tooltip as they live-update. Collapse those to the
-        // most recent registration so the band shows one row per logical icon.
-        var latest = new Dictionary<(ulong, string), HookRecord>();
-        var unnamed = new List<HookRecord>();
+        // Collapse all icons that share an owner window into one row. Some apps
+        // (e.g. Task Manager) register several icons on the same window with
+        // different ids/tooltips as they live-update ("CPU 41%" vs "Task Manager");
+        // keep the highest id, which is the stable app-identity registration.
+        var latest = new Dictionary<ulong, HookRecord>();
         foreach (HookRecord r in _icons.Values)
         {
-            if (string.IsNullOrEmpty(r.Name))
+            if (!latest.TryGetValue(r.HWnd, out HookRecord? kept) || r.Id > kept.Id)
             {
-                unnamed.Add(r);
-                continue;
-            }
-
-            var dedupeKey = (r.HWnd, r.Name);
-            if (!latest.TryGetValue(dedupeKey, out HookRecord? kept) || r.Id > kept.Id)
-            {
-                latest[dedupeKey] = r;
+                latest[r.HWnd] = r;
             }
         }
 
         var list = new List<HookRecord>(latest.Values);
-        list.AddRange(unnamed);
         list.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
         return list;
     }
@@ -126,6 +118,9 @@ internal sealed class TrayIconStore
             ? existing
             : new HookRecord { Key = key, HWnd = hwnd, Id = uid, Guid = guid };
 
+        bool isNew = existing is null;
+        bool changed = isNew;
+
         record.HWnd = hwnd;
         record.Id = uid;
         record.Guid = guid;
@@ -142,18 +137,77 @@ internal sealed class TrayIconStore
 
         if ((flags & NifTip) != 0 || (tip.Length > 0 && string.IsNullOrEmpty(record.Name)))
         {
-            record.Name = FirstLine(tip);
+            string newName = FirstLine(tip);
+            if (!string.Equals(record.Name, newName, StringComparison.Ordinal))
+            {
+                record.Name = newName;
+                changed = true;
+            }
         }
 
         if ((flags & NifIcon) != 0 && iconBytes > 0 && w > 0 && h > 0 && offset + iconBytes <= length)
         {
-            var rgba = new byte[iconBytes];
-            Array.Copy(msg, offset, rgba, 0, iconBytes);
-            record.IconPngPath = WritePng(key, rgba, w, h) ?? record.IconPngPath;
+            int hash = HashPixels(msg, offset, iconBytes);
+
+            // Only re-encode + bump the version when the pixels actually changed, so
+            // static icons keep a stable PNG the UI can reuse without flicker.
+            if (hash != record.IconHash || record.IconPngPath is null)
+            {
+                var rgba = new byte[iconBytes];
+                Array.Copy(msg, offset, rgba, 0, iconBytes);
+                string? path = WritePng(key, rgba, w, h, record.IconVersion + 1);
+                if (path is not null)
+                {
+                    DeleteQuietly(record.IconPngPath);
+                    record.IconPngPath = path;
+                    record.IconHash = hash;
+                    record.IconVersion++;
+                    changed = true;
+                }
+            }
         }
 
         _icons[key] = record;
-        Changed?.Invoke();
+
+        // Only notify when something the UI cares about actually changed. This keeps
+        // pure metadata churn (e.g. repeated no-op modifies) from repainting the band.
+        if (changed)
+        {
+            Changed?.Invoke();
+        }
+    }
+
+    private static int HashPixels(byte[] buffer, int offset, int count)
+    {
+        // FNV-1a over the RGBA bytes.
+        unchecked
+        {
+            const int prime = 16777619;
+            int hash = (int)2166136261;
+            int end = offset + count;
+            for (int i = offset; i < end; i++)
+            {
+                hash = (hash ^ buffer[i]) * prime;
+            }
+
+            return hash;
+        }
+    }
+
+    private static void DeleteQuietly(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception)
+        {
+        }
     }
 
     private static string FirstLine(string s)
@@ -162,13 +216,15 @@ internal sealed class TrayIconStore
         return (nl >= 0 ? s[..nl] : s).Trim();
     }
 
-    private static string? WritePng(string key, byte[] rgba, int w, int h)
+    private static string? WritePng(string key, byte[] rgba, int w, int h, int version)
     {
         try
         {
             byte[] png = PngWriter.Encode(rgba, w, h);
             Directory.CreateDirectory(IconDir);
-            string path = Path.Combine(IconDir, Sanitize(key) + ".png");
+            // Version the filename so a changed icon lands at a new path; this lets the
+            // UI cheaply detect "same path == same bitmap" and avoid reloading it.
+            string path = Path.Combine(IconDir, Sanitize(key) + "_v" + version + ".png");
             File.WriteAllBytes(path, png);
             return path;
         }
@@ -209,4 +265,10 @@ internal sealed class HookRecord
     public string Name { get; set; } = string.Empty;
 
     public string? IconPngPath { get; set; }
+
+    /// <summary>Hash of the current icon pixels, to detect real changes.</summary>
+    public int IconHash { get; set; }
+
+    /// <summary>Monotonic counter bumped only when the icon pixels change.</summary>
+    public int IconVersion { get; set; }
 }

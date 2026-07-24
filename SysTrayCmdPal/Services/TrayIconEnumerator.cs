@@ -4,6 +4,8 @@
 
 using System;
 using System.Collections.Generic;
+using Windows.Win32;
+using Windows.Win32.Foundation;
 using SysTrayCmdPal.Interop;
 using SysTrayCmdPal.Pages;
 
@@ -45,6 +47,12 @@ internal static class TrayIconEnumerator
 
     private static IReadOnlyList<TrayIcon> FromHook(IReadOnlyList<HookRecord> records, TrayScope scope)
     {
+        // Icons owned by explorer itself are the shell's own system indicators
+        // (volume, network, battery, "safely remove", bluetooth) — on Win11 these
+        // live in the combined "omni button" and can't be meaningfully invoked as
+        // individual items, so exclude them.
+        uint explorerPid = HookInjector.GetExplorerPid();
+
         // The hook sees every icon but not which are promoted to the taskbar; ask UI
         // Automation which names are currently visible so the two bands can differ.
         HashSet<string>? visibleNames = scope == TrayScope.VisibleOnly ? GetVisibleNames() : null;
@@ -52,6 +60,11 @@ internal static class TrayIconEnumerator
         var icons = new List<TrayIcon>(records.Count);
         foreach (HookRecord r in records)
         {
+            if (IsShellOwned(r.HWnd, explorerPid))
+            {
+                continue;
+            }
+
             bool isVisible = visibleNames is null || visibleNames.Contains(Normalize(r.Name));
             if (scope == TrayScope.VisibleOnly && !isVisible)
             {
@@ -66,6 +79,7 @@ internal static class TrayIconEnumerator
                 Version = r.Version,
                 ItemGuid = r.Guid,
                 IconPngPath = r.IconPngPath,
+                IconVersion = r.IconVersion,
                 Tooltip = r.Name,
                 IsVisible = isVisible,
             });
@@ -74,8 +88,34 @@ internal static class TrayIconEnumerator
         return icons;
     }
 
+    private static unsafe bool IsShellOwned(ulong hwnd, uint explorerPid)
+    {
+        if (hwnd == 0 || explorerPid == 0)
+        {
+            return false;
+        }
+
+        uint pid = 0;
+        _ = PInvoke.GetWindowThreadProcessId((HWND)(nint)hwnd, &pid);
+        return pid == explorerPid;
+    }
+
+    private static readonly object VisibleCacheGate = new();
+    private static HashSet<string> s_visibleNames = new(StringComparer.OrdinalIgnoreCase);
+    private static DateTime s_visibleAsOf = DateTime.MinValue;
+
     private static HashSet<string> GetVisibleNames()
     {
+        // A UIA descendants walk is expensive; cache it briefly so frequent rebuilds
+        // (e.g. driven by a live-updating icon) don't each re-walk the tree.
+        lock (VisibleCacheGate)
+        {
+            if (DateTime.UtcNow - s_visibleAsOf < TimeSpan.FromSeconds(2))
+            {
+                return s_visibleNames;
+            }
+        }
+
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -86,6 +126,12 @@ internal static class TrayIconEnumerator
         }
         catch (Exception)
         {
+        }
+
+        lock (VisibleCacheGate)
+        {
+            s_visibleNames = set;
+            s_visibleAsOf = DateTime.UtcNow;
         }
 
         return set;

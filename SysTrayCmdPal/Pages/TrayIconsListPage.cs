@@ -270,6 +270,8 @@ internal sealed partial class TrayIconsListPage : ListPage, IDisposable
 /// <summary>Left-clicks the tray icon (its default action).</summary>
 internal sealed partial class ActivateTrayIconCommand : InvokableCommand
 {
+    private static readonly IconInfo CommandIcon = new("\uE961"); // click
+
     private readonly string _id;
 
     public ActivateTrayIconCommand(TrayIcon icon)
@@ -284,7 +286,7 @@ internal sealed partial class ActivateTrayIconCommand : InvokableCommand
 
     public override string Id => _id;
 
-    public override IconInfo Icon => new("\uE961"); // click
+    public override IconInfo Icon => CommandIcon;
 
     public override ICommandResult Invoke()
     {
@@ -296,6 +298,8 @@ internal sealed partial class ActivateTrayIconCommand : InvokableCommand
 /// <summary>Right-clicks the tray icon to surface the owning app's native context menu.</summary>
 internal sealed partial class ContextMenuTrayIconCommand : InvokableCommand
 {
+    private static readonly IconInfo CommandIcon = new("\uE712");
+
     private readonly string _id;
 
     public ContextMenuTrayIconCommand(TrayIcon icon)
@@ -310,7 +314,7 @@ internal sealed partial class ContextMenuTrayIconCommand : InvokableCommand
 
     public override string Id => _id;
 
-    public override IconInfo Icon => new("\uE712");
+    public override IconInfo Icon => CommandIcon;
 
     public override ICommandResult Invoke()
     {
@@ -322,6 +326,8 @@ internal sealed partial class ContextMenuTrayIconCommand : InvokableCommand
 /// <summary>Middle-clicks the tray icon.</summary>
 internal sealed partial class MiddleClickTrayIconCommand : InvokableCommand
 {
+    private static readonly IconInfo CommandIcon = new("\uE962");
+
     private readonly string _id;
 
     public MiddleClickTrayIconCommand(TrayIcon icon)
@@ -336,7 +342,7 @@ internal sealed partial class MiddleClickTrayIconCommand : InvokableCommand
 
     public override string Id => _id;
 
-    public override IconInfo Icon => new("\uE962");
+    public override IconInfo Icon => CommandIcon;
 
     public override ICommandResult Invoke()
     {
@@ -348,11 +354,13 @@ internal sealed partial class MiddleClickTrayIconCommand : InvokableCommand
 /// <summary>Forces the shell to re-broadcast tray icons, then refreshes the list.</summary>
 internal sealed partial class RefreshTrayCommand(TrayIconsListPage page) : InvokableCommand
 {
+    private static readonly IconInfo CommandIcon = new("\uE72C");
+
     public override string Name => "Refresh";
 
     public override string Id => "com.zadjii.systray.refresh";
 
-    public override IconInfo Icon => new("\uE72C");
+    public override IconInfo Icon => CommandIcon;
 
     public override ICommandResult Invoke()
     {
